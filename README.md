@@ -1,2 +1,2 @@
 # datarunneR
-Dynamic analysis of datasets.
+Dynamic analysis of unweighted, stratified and clustered datasets.
