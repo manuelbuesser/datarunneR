@@ -1,5 +1,5 @@
 # datarunneR v1 (beta)
-# last update: 06/03/2021
+# last updated: 15/03/2021
 # Github link: https://github.com/manuelbuesser/datarunneR
 
 #### START #####################################################################
@@ -29,11 +29,6 @@ cols1 <- c("#ee5859", "#58585a", "#f7acac", "#acacad", "#a5c9a1", "#d2e4d0", "#5
 #### * Formulas ################################################################
 
 # define function to detect binary variables
-#is.binary <- function(v) {
-#  x <- unique(v)
-#  length(x) - sum(is.na(x)) <= 2L
-#}
-
 is.binary <- function(x) {all(na.omit(x) %in% 0:1)}
 
 
@@ -66,14 +61,15 @@ execute_if <- function(.data, .predicate, .language)
 
 #### USER INTERFACE ############################################################
 
-ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
+ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR (beta)"),
+                 windowTitle = "datarunneR",
                  theme = shinytheme("simplex"),
-                 
                  
                  #### * Inputs tab #############################################
                  
                  tabPanel("Inputs",
                           icon = icon("upload"),
+                          
                           sidebarLayout(
                             
                             sidebarPanel(
@@ -101,6 +97,8 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                                  status = "danger"),
                               
                               hr(),
+                              
+                              tags$h5("Specify analysis parameters:"),
                               
                               prettyRadioButtons("type", "Sample type",
                                                  choices = c("Unweighted sample"         = "un",
@@ -146,19 +144,23 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                  #### * Analysis tab ###########################################
                  
                  tabPanel("Analysis",
+                          icon = icon("chart-bar"),
+                          
                           sidebarLayout(
                             sidebarPanel(
+                              
+                              tags$style(HTML('table.dataTable tr.active td {background-color: #58585a !important;}')),
                               
                               pickerInput("select_indicator",
                                           label = "Indicator:",   
                                           choices = NULL,
                                           selected = NULL,
                                           multiple = FALSE,
-                                          options = list(title = "Select", `actions-box` = TRUE, `live-search` = TRUE)
+                                          options = pickerOptions(title = "Select", actionsBox = TRUE, liveSearch = TRUE)
                               ),
                               
                               prettySwitch("factor",
-                                           label = "Format as factor",
+                                           label = "Numeric as factor",
                                            status = "success",
                                            fill = TRUE
                               ),
@@ -211,22 +213,29 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                               
                               hr(),
                               
-                              actionButton("table_reset", "Reset selection"),
+                              actionButton("run", "Run!", icon = icon("running"), class = "btn-primary", style="margin-bottom:4px"),
                               
-                              downloadButton("downloadData", "Download as CSV"),
+                              actionButton("table_reset", "Reset selection", icon = icon("undo-alt"), style="margin-bottom:4px"),
+                              
+                              downloadButton("downloadData", "Download as CSV", style="margin-bottom:4px"),
+                              
+                              useSweetAlert(),
                               
                               width = 3
                             ),
                             
                             mainPanel(
                               align = "center",
-                              dataTableOutput("table"),
-                              tags$i(h5(textOutput("no_data"), style = "color: red;")),
                               highchartOutput("plot"),
+                              dataTableOutput("table"),
                               width = 9
                             )
                           ) #sidebarlayout
-                 ) #tabpanel
+                 )#, #tabpanel
+                 
+                 #tabPanel("",
+                  #        icon = icon("question-circle"),
+                 #) #tabpanel
 ) #navbarpage
 
 
@@ -246,7 +255,8 @@ server <- function(input, output, session) {
                                 sep = input$sep,
                                 quote = input$quote,
                                 na.strings=c("", "NA", " "),
-                                stringsAsFactors = TRUE)
+                                stringsAsFactors = TRUE) %>%
+          mutate_if(is.binary, as.factor) # change class of binary variables
         
       },
       error = function(e) {
@@ -319,10 +329,10 @@ server <- function(input, output, session) {
   
   #### * Design & analysis ##############################################
   
+  
   # apply dynamic filters to datasets
-  data_filter <- reactive({
+  data_filter <- eventReactive(input$run, {
     data_upload() %>%
-      mutate_if(is.binary, as.factor) %>% # change class of binary variables
       execute_if(input$factor, mutate_at(input$select_indicator, as.factor)) %>%
       #execute_if(input$type == "strat", filter(is.null(input$select_strata) | strata  %in% input$select_strata)) %>%
       filter(if(input$type == "strat") is.null(input$select_strata) | strata  %in% input$select_strata else TRUE) %>%
@@ -343,7 +353,9 @@ server <- function(input, output, session) {
   
   
   # run analysis
-  results <- reactive({
+  results <- eventReactive(input$run, {
+    
+    input$run
     
     if (is.factor(data_filter()[[input$select_indicator]])) {
       # factor variables (character or binary):
@@ -367,15 +379,19 @@ server <- function(input, output, session) {
                                                           count = unweighted(sum(!is.na(get(input$select_indicator))))))
     }
   })
-
   
-  # define error message in case there is no data
-  output$no_data <- renderText({
-    
-    req(input$select_indicator != "")
-    
+  
+  # error message in case an empty column is called
+  observeEvent(input$run, {
     if (all(is.na(data_filter()[[input$select_indicator]]))) {
-      "There is no data for this selection. Select another indicator."} else {NULL}
+      sendSweetAlert(
+        session = session,
+        title = "No data!",
+        text = "There is no data for this selection. Select another indicator.",
+        type = "error",
+        btn_colors = "#454747"
+      )
+    }
   })
   
   
@@ -384,17 +400,19 @@ server <- function(input, output, session) {
   # render output table
   output$table <- renderDT({
     
-    req(input$select_indicator != "")
+    input$run
     
-    table <- DT::datatable(
+    isolate(req(input$select_indicator != ""))
+    
+    table <- isolate(DT::datatable(
       results(),
-      options = list(dom = 't', paging = FALSE#, order = list(1, 'desc')
-      ),
+      options = list(dom = "t", paging = FALSE),
       rownames = FALSE,
-      style = 'bootstrap',
-      class = 'table-condensed table-hover table-striped') %>%
+      style = "bootstrap",
+      class = "table-condensed table-hover table-striped") %>%
       execute_if(is.factor(data_filter()[[input$select_indicator]]), formatPercentage(c("stat", "stat_low", "stat_upp"), 1)) %>%
       execute_if(!is.factor(data_filter()[[input$select_indicator]]), formatRound(c("stat", "stat_low", "stat_upp"), 1))
+    )
   })
   
   
@@ -403,16 +421,18 @@ server <- function(input, output, session) {
   # render plot
   output$plot <- renderHighchart({
     
-    if (all(is.na(data_filter()[[input$select_indicator]]))) {
+    input$run
+    
+    if (all(is.na(data_filter()[[isolate(input$select_indicator)]]))) {
       return(NULL)
     } else {
       
       # factor variable - no disaggregation
-      if (is.factor(data_filter()[[input$select_indicator]]) & is.null(input$select_group)) {
+      isolate(if (is.factor(data_filter()[[input$select_indicator]]) & is.null(input$select_group)) {
         results1 <- results() %>%
           mutate(var = get(input$select_indicator))
         plot <- hchart(results1, "column", hcaes(x = var, y = stat))
-        
+      
         # factor variable - 1 disaggregation variable
       } else if (is.factor(data_filter()[[input$select_indicator]]) & !is.null(input$select_group) & is.null(input$select_group2)) {
         results1 <- results() %>%
@@ -446,9 +466,9 @@ server <- function(input, output, session) {
                  var2 = get(input$select_group2))
         plot <- hchart(results1, "column", hcaes(x = var, y = stat, group = var2)) %>%
           hc_plotOptions(series=list(stacking='normal'))
-      }
+      })
       
-      plot <- plot %>%
+      plot <- isolate(plot %>%
         execute_if(is.factor(data_filter()[[input$select_indicator]]), hc_yAxis(min = 0, max = 1, title = list(text="proportion"))) %>%
         execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "mean", hc_yAxis(title = list(text="mean"))) %>%
         execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "median", hc_yAxis(title = list(text="median"))) %>%
@@ -462,10 +482,9 @@ server <- function(input, output, session) {
         hc_exporting(
           enabled = TRUE,
           filename = paste0("plot_export-", Sys.Date()),
-          buttons = list(contextButton = list(menuItems = list("downloadPNG", "downloadPDF", "downloadCSV"))),
-          #sourceWidth = 1000,
-          sourceHeight = 700
+          buttons = list(contextButton = list(menuItems = list("downloadPNG", "downloadPDF", "downloadCSV")))
         )
+      )
     }
   })
 
