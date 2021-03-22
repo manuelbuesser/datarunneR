@@ -1,5 +1,5 @@
 # datarunneR v1 (beta)
-# last updated: 15/03/2021
+# last updated: 22/03/2021
 # Github link: https://github.com/manuelbuesser/datarunneR
 
 #### START #####################################################################
@@ -74,22 +74,22 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR (beta)"
                             
                             sidebarPanel(
                               
-                              tags$h5("Upload dataset:"),
+                              tags$h5("Upload dataset"),
                               
-                              fileInput("file1", "Choose CSV file",
+                              fileInput("file1", "Choose CSV file:",
                                         multiple = FALSE,
                                         accept = c("text/csv",
                                                    "text/comma-separated-values,text/plain",
                                                    ".csv")),
                               
-                              prettyRadioButtons("sep", "Separator",
+                              prettyRadioButtons("sep", "Separator:",
                                                  choices = c(Comma = ",",
                                                              Semicolon = ";",
                                                              Tab = "\t"),
                                                  selected = ",",
                                                  status = "danger"),
                               
-                              prettyRadioButtons("quote", "Quote",
+                              prettyRadioButtons("quote", "Quote:",
                                                  choices = c(None = "",
                                                              "Double Quote" = '"',
                                                              "Single Quote" = "'"),
@@ -98,21 +98,15 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR (beta)"
                               
                               hr(),
                               
-                              tags$h5("Specify analysis parameters:"),
+                              tags$h5("Specify analysis parameters"),
                               
-                              prettyRadioButtons("type", "Sample type",
+                              prettyRadioButtons("type", "Sample type:",
                                                  choices = c("Unweighted sample"         = "un",
                                                              "Stratified sample"         = "strat",
                                                              "One-stage cluster sample"  = "clust1",
                                                              "Two-stage cluster sample"  = "clust2",
                                                              "Stratified cluster sample" = "strat_clust"),
                                                  selected = "un",
-                                                 status = "danger"),
-                              
-                              prettyRadioButtons("statistic", "Statistic (for numerical variables)",
-                                                 choices = c("Mean" = "mean",
-                                                             "Median" = "median"),
-                                                 selected = "mean",
                                                  status = "danger"),
                               
                               conditionalPanel(condition = "input.type == 'strat'",
@@ -157,18 +151,6 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR (beta)"
                                           selected = NULL,
                                           multiple = FALSE,
                                           options = pickerOptions(title = "Select", actionsBox = TRUE, liveSearch = TRUE)
-                              ),
-                              
-                              prettySwitch("factor",
-                                           label = "Numeric as factor",
-                                           status = "success",
-                                           fill = TRUE
-                              ),
-                              
-                              prettySwitch("na",
-                                           label = "Include missing values",
-                                           status = "success",
-                                           fill = TRUE
                               ),
                               
                               hr(),
@@ -218,6 +200,56 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR (beta)"
                               actionButton("table_reset", "Reset selection", icon = icon("undo-alt"), style="margin-bottom:4px"),
                               
                               downloadButton("downloadData", "Download as CSV", style="margin-bottom:4px"),
+                              
+                              conditionalPanel(condition = "input.more_options == 0 | input.more_options == input.less_options",
+                                               actionButton("more_options", "More options", icon = icon("caret-down"), style="margin-bottom:4px")
+                              ),
+                              
+                              conditionalPanel(condition = "input.more_options > input.less_options",
+                                               actionButton("less_options", "Less options", icon = icon("caret-up"), style="margin-bottom:4px")
+                              ),
+                              
+                              conditionalPanel(condition = "input.more_options > input.less_options", br(),
+                                               
+                                               prettySwitch("factor",
+                                                            label = "Numeric as factor",
+                                                            status = "success",
+                                                            fill = TRUE
+                                               ),
+                                               
+                                               prettySwitch("na",
+                                                            label = "Include missing values",
+                                                            status = "success",
+                                                            fill = TRUE
+                                               ),
+                                               
+                                               prettyRadioButtons("confidence", "Confidence level (for confidence intervals):",
+                                                                  choices = c("90%" = 0.9,
+                                                                              "95% (default)" = 0.95,
+                                                                              "99%" = 0.99),
+                                                                  selected = 0.95,
+                                                                  status = "danger"),
+                                               
+                                               prettyRadioButtons("statistic", "Statistic (for numerical variables):",
+                                                                  choices = c("Mean" = "mean",
+                                                                              "Median" = "median"),
+                                                                  selected = "mean",
+                                                                  status = "danger"),
+                                               
+                                               prettySwitch("count",
+                                                            label = "Display counts (categoric var.)",
+                                                            status = "success",
+                                                            fill = TRUE
+                                               ),
+                                               
+                                               prettySwitch("interval",
+                                                            label = "Display confidence intervals",
+                                                            status = "success",
+                                                            fill = TRUE
+                                               ),
+                                               
+                                               numericInput("rounding", "Decimals:", 1, min = 0, max = 10, step = 1, width = "60px"),
+                              ),
                               
                               useSweetAlert(),
                               
@@ -314,6 +346,13 @@ server <- function(input, output, session) {
   })
   
   
+  # make sure CI switch goes back to default when count is displayed
+  observe({
+    input$count
+    updatePrettySwitch(session, "interval", value = FALSE)
+  })
+  
+  
   # define reset button parameters
   observe({
     input$table_reset
@@ -324,6 +363,11 @@ server <- function(input, output, session) {
     updatePickerInput(session, "select_strata", selected = "")
     updatePickerInput(session, "select_ind", selected = "")
     updatePickerInput(session, "select_ind_value", selected = "")
+    updatePrettyRadioButtons(session, "confidence", selected = 0.95)
+    updatePrettyRadioButtons(session, "statistic", selected = "mean")
+    updatePrettySwitch(session, "count", value = FALSE)
+    updatePrettySwitch(session, "interval", value = FALSE)
+    updateNumericInput(session, "rounding", value = 1)
   })
   
   
@@ -364,7 +408,7 @@ server <- function(input, output, session) {
         group_by_(if(is.null(input$select_group)) input$select_indicator else TRUE) %>%
         execute_if(!is.null(input$select_group), group_by_(input$select_group, input$select_indicator)) %>%
         execute_if(!is.null(input$select_group) & !is.null(input$select_group2), group_by_(input$select_group2, input$select_group, input$select_indicator)) %>%
-        summarize(stat = survey_mean(na.rm = TRUE, vartype = "ci", proportion = TRUE),
+        summarize(stat = survey_mean(na.rm = TRUE, vartype = "ci", level = as.numeric(input$confidence), proportion = TRUE),
                   count = unweighted(n()))
       
     } else {
@@ -373,9 +417,9 @@ server <- function(input, output, session) {
         filter(!is.na(input$select_indicator)) %>%
         group_by_(if(!is.null(input$select_group)) input$select_group else TRUE) %>%
         execute_if(!is.null(input$select_group) & !is.null(input$select_group2), group_by_(input$select_group2, input$select_group)) %>%
-        execute_if(input$statistic == "mean", summarize(stat = survey_mean(get(input$select_indicator), na.rm=TRUE, vartype = "ci"),
+        execute_if(input$statistic == "mean", summarize(stat = survey_mean(get(input$select_indicator), na.rm=TRUE, vartype = "ci", level = as.numeric(input$confidence)),
                                                         count = unweighted(sum(!is.na(get(input$select_indicator)))))) %>%
-        execute_if(input$statistic == "median", summarize(stat = survey_median(get(input$select_indicator), na.rm=TRUE, vartype = "ci"),
+        execute_if(input$statistic == "median", summarize(stat = survey_median(get(input$select_indicator), na.rm=TRUE, vartype = "ci", level = as.numeric(input$confidence)),
                                                           count = unweighted(sum(!is.na(get(input$select_indicator))))))
     }
   })
@@ -410,8 +454,8 @@ server <- function(input, output, session) {
       rownames = FALSE,
       style = "bootstrap",
       class = "table-condensed table-hover table-striped") %>%
-      execute_if(is.factor(data_filter()[[input$select_indicator]]), formatPercentage(c("stat", "stat_low", "stat_upp"), 1)) %>%
-      execute_if(!is.factor(data_filter()[[input$select_indicator]]), formatRound(c("stat", "stat_low", "stat_upp"), 1))
+      execute_if(is.factor(data_filter()[[input$select_indicator]]), formatPercentage(c("stat", "stat_low", "stat_upp"), input$rounding)) %>%
+      execute_if(!is.factor(data_filter()[[input$select_indicator]]), formatRound(c("stat", "stat_low", "stat_upp"), input$rounding))
     )
   })
   
@@ -431,14 +475,20 @@ server <- function(input, output, session) {
       isolate(if (is.factor(data_filter()[[input$select_indicator]]) & is.null(input$select_group)) {
         results1 <- results() %>%
           mutate(var = get(input$select_indicator))
-        plot <- hchart(results1, "column", hcaes(x = var, y = stat))
+        plot <- results1 %>%
+          execute_if(!input$count, hchart("column", hcaes(x = var, y = stat))) %>%
+          execute_if(!input$count & input$interval, hc_add_series(name = "confidence interval", data = list_parse(mutate(results1, low = stat_low, high = stat_upp)),
+                                                                  type = "errorbar", color = "black", stemWidth = 1)) %>%
+          execute_if(input$count, hchart("column", hcaes(x = var, y = count)))
       
         # factor variable - 1 disaggregation variable
       } else if (is.factor(data_filter()[[input$select_indicator]]) & !is.null(input$select_group) & is.null(input$select_group2)) {
         results1 <- results() %>%
           mutate(var = get(input$select_indicator),
                  var2 = get(input$select_group))
-        plot <- hchart(results1, "column", hcaes(x = var2, y = stat, group = var)) %>%
+        plot <- results1 %>%
+          execute_if(!input$count, hchart("column", hcaes(x = var2, y = stat, group = var))) %>%
+          execute_if(input$count, hchart("column", hcaes(x = var2, y = count, group = var))) %>%
           hc_plotOptions(series=list(stacking='normal'))
         
         # factor variable - 2 disaggregation variables
@@ -451,13 +501,17 @@ server <- function(input, output, session) {
         
         # numeric variable - no disaggregation
       } else if(is.null(input$select_group)) {
-        plot <- hchart(results(), "column", hcaes(x = "1", y = stat))  
+        plot <- hchart(results(), "column", hcaes(x = "1", y = stat)) %>%
+          execute_if(input$interval, hc_add_series(name = "confidence interval", data = list_parse(mutate(results(), x = "1", low = stat_low, high = stat_upp)),
+                                                   type = "errorbar", color = "black", stemWidth = 1))
         
         # numeric variable - 1 disaggregation variable
       } else if(!is.null(input$select_group) & is.null(input$select_group2)) {
         results1 <- results() %>%
           mutate(var = get(input$select_group))
-        plot <- hchart(results1, "column", hcaes(x = var, y = stat))  
+        plot <- hchart(results1, "column", hcaes(x = var, y = stat)) %>%
+          execute_if(input$interval, hc_add_series(name = "confidence interval", data = list_parse(mutate(results1, low = stat_low, high = stat_upp)),
+                                                   type = "errorbar", color = "black", stemWidth = 1))
         
         # numeric variable - 2 disaggregation variables
       } else if(!is.null(input$select_group) & !is.null(input$select_group2)) {
@@ -465,14 +519,18 @@ server <- function(input, output, session) {
           mutate(var = paste0(get(input$select_group2), " - ", get(input$select_group)),
                  var2 = get(input$select_group2))
         plot <- hchart(results1, "column", hcaes(x = var, y = stat, group = var2)) %>%
-          hc_plotOptions(series=list(stacking='normal'))
+          hc_plotOptions(series=list(stacking='normal')) %>%
+          execute_if(input$interval, hc_add_series(name = "confidence interval", data = list_parse(mutate(results1, low = stat_low, high = stat_upp)),
+                                                   type = "errorbar", color = "black", stemWidth = 1))
       })
       
       plot <- isolate(plot %>%
-        execute_if(is.factor(data_filter()[[input$select_indicator]]), hc_yAxis(min = 0, max = 1, title = list(text="proportion"))) %>%
-        execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "mean", hc_yAxis(title = list(text="mean"))) %>%
-        execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "median", hc_yAxis(title = list(text="median"))) %>%
-        hc_tooltip(valueDecimals = 3) %>%
+        execute_if(is.factor(data_filter()[[input$select_indicator]]) & !input$count, hc_yAxis(min = 0, max = 1, title = list(text="proportion"))) %>%
+        execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "mean" & !input$count, hc_yAxis(title = list(text="mean"))) %>%
+        execute_if(!is.factor(data_filter()[[input$select_indicator]]) & input$statistic == "median" & !input$count, hc_yAxis(title = list(text="median"))) %>%
+        execute_if(is.factor(data_filter()[[input$select_indicator]]) & !input$count, hc_tooltip(valueDecimals = (input$rounding + 2))) %>%
+        execute_if(!is.factor(data_filter()[[input$select_indicator]]) & !input$count, hc_tooltip(valueDecimals = input$rounding)) %>%
+        execute_if(input$count, hc_yAxis(min = 0, title = list(text="count"))) %>%
         hc_colors(cols1) %>%
         hc_title(
           text = input$select_indicator,
