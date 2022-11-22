@@ -25,9 +25,8 @@ library(purrr)                            # for multiple choice loop
 library(htmlwidgets)                      # modifications on leaflet map
 library(shinybusy)                        # loading animations
 library(lubridate)                        # guess date formats
-#library(rvest)
-library(tidytext)
-library(stringr)
+library(tidytext)                         # text analysis
+library(stringr)                          # text processing
 
 #### * Formulas ################################################################
 
