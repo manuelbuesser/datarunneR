@@ -1,5 +1,5 @@
 # datarunneR v2
-# last updated: 21/11/2022
+# last updated: 22/11/2022
 # Github link: https://github.com/manuelbuesser/datarunneR
 
 #### START #####################################################################
@@ -24,6 +24,10 @@ library(vtable)                           # to display dataset overview
 library(purrr)                            # for multiple choice loop
 library(htmlwidgets)                      # modifications on leaflet map
 library(shinybusy)                        # loading animations
+library(lubridate)                        # guess date formats
+#library(rvest)
+library(tidytext)
+library(stringr)
 
 #### * Formulas ################################################################
 
@@ -173,7 +177,6 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                                )
                               ),
                               
-                              
                               # indicator selection for multiple choice indicators
                               conditionalPanel(condition = "input.multiple_choice == 1",
                                                pickerInput("select_indicator_mc",
@@ -285,6 +288,46 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                                             fill = TRUE
                                                ),
                                                
+                                               conditionalPanel(condition = "input.timeseries == 1",
+                                                                hr()
+                                               ),
+                                               
+                                               prettySwitch("timeseries",
+                                                            label = "Timeseries",
+                                                            status = "success",
+                                                            fill = TRUE
+                                               ),
+                                               
+                                               conditionalPanel(condition = "input.timeseries == 1",
+                                                                pickerInput("select_date",
+                                                                            label = "Select date variable:",   
+                                                                            choices = NULL,
+                                                                            selected = NULL,
+                                                                            multiple = FALSE,
+                                                                            options = pickerOptions(title = "Date variable", actionsBox = TRUE, liveSearch = TRUE)
+                                                                ),
+                                                                
+                                                                # input to change confidence level for analysis
+                                                                prettyRadioButtons("timeseries_statistic", "Statistic:",
+                                                                                   choices = c("Sum" = "sum",
+                                                                                               "Mean" = "mean",
+                                                                                               "Median" = "median"),
+                                                                                   selected = "mean",
+                                                                                   status = "danger"),
+                                                                
+                                                                # input to change confidence level for analysis
+                                                                prettyRadioButtons("timeseries_time", "Temporal aggregation:",
+                                                                                   choices = c("None" = "none",
+                                                                                               "Day" = "day",
+                                                                                               "Week" = "week",
+                                                                                               "Month" = "month",
+                                                                                               "Year" = "year"),
+                                                                                   selected = "none",
+                                                                                   status = "danger"),
+                                                                
+                                                                hr()
+                                               ),
+                                               
                                                # input to change confidence level for analysis
                                                prettyRadioButtons("confidence", "Confidence level:",
                                                                   choices = c("90%" = 0.9,
@@ -367,7 +410,7 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                 dropdown(
                                   tags$h4("Chart options:"),
                                   tags$h5("Type:"),
-                                  tags$i(h6("numeric:",
+                                  tags$i(h6("Numeric:",
                                             style="color:grey;text-align:justify")),
                                   
                                   prettySwitch("histogram",
@@ -400,29 +443,7 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                                fill = TRUE
                                   ),
                                   
-                                  conditionalPanel(condition = "input.timeseries == 1",
-                                                   hr()
-                                  ),
-                                  
-                                  prettySwitch("timeseries",
-                                               label = "Timeseries",
-                                               status = "success",
-                                               fill = TRUE
-                                  ),
-                                  
-                                  conditionalPanel(condition = "input.timeseries == 1",
-                                                   pickerInput("select_date",
-                                                               label = "Select date variable:",   
-                                                               choices = NULL,
-                                                               selected = NULL,
-                                                               multiple = FALSE,
-                                                               options = pickerOptions(title = "Date variable", actionsBox = TRUE, liveSearch = TRUE)
-                                                   ),
-                                                   
-                                                   hr()
-                                  ),
-
-                                  tags$i(h6("categorical:",
+                                  tags$i(h6("Categorical:",
                                             style="color:grey;text-align:justify")),
                                   
                                   prettySwitch("stacked",
@@ -433,6 +454,30 @@ ui <- navbarPage(title = HTML("<i class='fas fa-running'></i> datarunneR"),
                                   
                                   prettySwitch("donut",
                                                label = "Donut",
+                                               status = "success",
+                                               fill = TRUE
+                                  ),
+                                  
+                                  prettySwitch("sankey",
+                                               label = "Sankey",
+                                               status = "success",
+                                               fill = TRUE
+                                  ),
+                                  
+                                  tags$i(h6("Dates:",
+                                            style="color:grey;text-align:justify")),
+                                  
+                                  prettySwitch("line",
+                                               label = "Line graph",
+                                               status = "success",
+                                               fill = TRUE
+                                  ),
+                                  
+                                  tags$i(h6("Text:",
+                                            style="color:grey;text-align:justify")),
+                                  
+                                  prettySwitch("wordcloud",
+                                               label = "Wordcloud",
                                                status = "success",
                                                fill = TRUE
                                   ),
@@ -705,8 +750,6 @@ server <- function(input, output, session) {
   # define reset button parameters
   observe({
     input$table_reset
-    updatePrettySwitch(session, "factor", value = FALSE)
-    updatePrettySwitch(session, "na", value = FALSE)
     updatePickerInput(session, "select_group", selected = "")
     updatePickerInput(session, "select_group2", selected = "")
     updatePickerInput(session, "select_strata", selected = "")
@@ -714,12 +757,24 @@ server <- function(input, output, session) {
     updatePickerInput(session, "select_ind_value", selected = "")
     updatePickerInput(session, "select_ind2", selected = "")
     updatePickerInput(session, "select_ind_value2", selected = "")
+    updatePrettySwitch(session, "multiple_choice", value = FALSE)
+    updatePrettySwitch(session, "factor", value = FALSE)
+    updatePrettySwitch(session, "na", value = FALSE)
     updatePrettyRadioButtons(session, "confidence", selected = 0.95)
     updatePrettyRadioButtons(session, "statistic", selected = "mean")
+    updatePrettySwitch(session, "histogram", value = FALSE)
+    updatePrettySwitch(session, "density", value = FALSE)
+    updatePrettySwitch(session, "boxplot", value = FALSE)
+    updatePrettySwitch(session, "heatmap", value = FALSE)
+    updatePrettySwitch(session, "scatter", value = FALSE)
+    updatePrettySwitch(session, "timeseries", value = FALSE)
+    updatePrettySwitch(session, "stacked", value = FALSE)
+    updatePrettySwitch(session, "donut", value = FALSE)
     updatePrettySwitch(session, "count", value = FALSE)
     updatePrettySwitch(session, "interval", value = FALSE)
-    updatePrettySwitch(session, "stacked", value = FALSE)
+    updatePrettySwitch(session, "select_ci", value = FALSE)
     updateNumericInput(session, "rounding", value = 1)
+    updatePrettySwitch(session, "select_map", value = FALSE)
   })
   
   
@@ -841,6 +896,8 @@ server <- function(input, output, session) {
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = 'run', title = "Click to run the analysis as per your inputs.",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = 'multiple_choice', title = "Click to select multiple answer options at once.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = 'factor', title = "Interpret numeric values as categorical.",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = 'na', title = "Include empty values in analysis.",
@@ -859,9 +916,21 @@ server <- function(input, output, session) {
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = "boxplot", title = "Display a numeric variable in a boxplot. You can add a disaggregation.",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "scatter", title = "Display a scatterplot with two numerical variables.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "timeseries", title = "Display timeseries data. Your date column needs the format YYYY-MM-DD.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "timeseries_statistic", title = "Define how data is aggregated when there are multiple data points per date.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "timeseries_time", title = "Define how you want to aggregate across time.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = "heatmap", title = "Display a numeric variable in a heatmap. Two disaggregations are required.",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = "stacked", title = "Display bar plot.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "donut", title = "Display donut/pie chart.",
+             placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
+  addTooltip(session, id = "line", title = "Display line chart. This only works with date column in format YYYY-MM-DD",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
   addTooltip(session, id = "select_map", title = "If you have latitude/longitude in your data, you can display any numeric variables on a map.",
              placement = "top", trigger = "hover", options = list(delay = list(show=1000)))
@@ -955,14 +1024,20 @@ server <- function(input, output, session) {
       # factor variable - no disaggregation
       isolate(if ((is.factor(data_filter()[[input$select_indicator]]) | input$multiple_choice) & is.null(input$select_group)) {
         
-        if (!input$donut){
+        if (!input$donut & !input$wordcloud){
           results1 <- results() %>%
-            execute_if(!input$multiple_choice, mutate(var = get(input$select_indicator)))
+            execute_if(!input$multiple_choice, mutate(var = get(input$select_indicator))) %>%
+            execute_if(input$line, mutate(var = as.Date(get(input$select_indicator), format = "%Y-%m-%d")))
+          
           plot <- results1 %>%
-            execute_if(!input$stacked & !input$count, hchart("column", hcaes(x = var, y = stat*100))) %>%
+            execute_if(!input$stacked & !input$count & !input$line, hchart("column", hcaes(x = var, y = stat*100))) %>%
+            execute_if(input$line & !input$count, hchart("line", hcaes(x = var, y = stat*100))) %>%
+            execute_if(input$line & input$count, hchart("line", hcaes(x = var, y = count))) %>%
+            execute_if(input$line, hc_chart(zoomType = "x")) %>%
+            execute_if(input$line, hc_plotOptions(line=list(marker=list(enabled = FALSE)))) %>%
             execute_if(!input$stacked & !input$count & input$interval, hc_add_series(name = "confidence interval", data = list_parse(mutate(results1, low = stat_low*100, high = stat_upp*100)),
                                                                                      type = "errorbar", color = "black", stemWidth = 1)) %>%
-            execute_if(!input$stacked & input$count, hchart("column", hcaes(x = var, y = count))) %>%
+            execute_if(!input$stacked & input$count & !input$line, hchart("column", hcaes(x = var, y = count))) %>%
             execute_if(input$stacked, hchart("bar", hcaes(y = stat*100, group = var))) %>%
             execute_if(input$stacked, hc_plotOptions(series=list(stacking='normal'))) %>%
             execute_if(input$stacked, hc_legend(reversed = TRUE))  %>%
@@ -984,26 +1059,65 @@ server <- function(input, output, session) {
                                       dataLabels = list(enabled = TRUE,
                                                         format = '<b>{point.name}</b>: {point.percentage:.1f} %'))) %>%
             hc_tooltip(headerFormat = "<span style = 'color:{point.color}'>\u25CF</span> {point.key}<br>", pointFormat = "<b>{point.percentage:.1f}%</b> ({point.count} counts)")
+        } else if (input$wordcloud){
+          
+          text <- paste(data_filter()[[input$select_indicator]])
+          
+          textcld <- text %>% 
+            map(str_to_lower) %>% 
+            reduce(str_c) %>% 
+            str_split("\\s+") %>% 
+            unlist() %>% 
+            data_frame(word = .) %>% 
+            count(word, sort = TRUE) %>% 
+            anti_join(tidytext::stop_words) %>%
+            head(50)
+          
+          plot <- hchart(textcld, "wordcloud", hcaes(name = word, weight = log(n))) %>%
+            hc_tooltip(headerFormat = "<span style = 'color:{point.color}'>\u25CF</span> <span style = 'font-size:10'>{point.key}:</span><br>", pointFormat = "<b>{point.n}</b> mentions")
+          
         }
         
       # factor variable - 1 disaggregation variable
       } else if ((is.factor(data_filter()[[input$select_indicator]]) | input$multiple_choice) & !is.null(input$select_group) & is.null(input$select_group2)) {
         
+        if (!input$sankey){
         results1 <- results() %>%
-          execute_if(!input$multiple_choice, mutate(var = get(input$select_indicator),
+          execute_if(!input$multiple_choice & !input$line, mutate(var = get(input$select_indicator),
+                                                    var2 = get(input$select_group))) %>%
+          execute_if(!input$multiple_choice & input$line, mutate(var = as.Date(get(input$select_indicator), format = "%Y-%m-%d"),
                                                     var2 = get(input$select_group))) %>%
           execute_if(input$multiple_choice, mutate(var2 = get(input$select_group)))
         plot <- results1 %>%
-          execute_if(!input$count, hchart("column", hcaes(x = var2, y = stat*100, group = var))) %>%
-          execute_if(input$count, hchart("column", hcaes(x = var2, y = count, group = var))) %>%
-          execute_if(!input$multiple_choice, hc_plotOptions(series=list(stacking='normal')))  %>%
+          execute_if(!input$count & !input$line, hchart("column", hcaes(x = var2, y = stat*100, group = var))) %>%
+          execute_if(input$count & !input$line, hchart("column", hcaes(x = var2, y = count, group = var))) %>%
+          execute_if(input$line & !input$count, hchart("line", hcaes(x = var, y = stat*100, group = var2))) %>%
+          execute_if(input$line & input$count, hchart("line", hcaes(x = var, y = count, group = var2))) %>%
+          execute_if(input$line, hc_chart(zoomType = "x")) %>%
+          execute_if(input$line, hc_plotOptions(line=list(marker=list(enabled = FALSE)))) %>%
+          execute_if(!input$multiple_choice & !input$line, hc_plotOptions(series=list(stacking='normal')))  %>%
           execute_if(!input$count, hc_yAxis(min = 0, max = 100, title = list(text=""), labels = list(format = "{value}%"))) %>%
-          execute_if(!input$count & !input$multiple_choice, hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.percentage:.1f}%</b> ({point.count} counts)")) %>%
+          execute_if(!input$count & !input$multiple_choice & !input$line, hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.percentage:.1f}%</b> ({point.count} counts)")) %>%
+          execute_if(!input$count & !input$multiple_choice & input$line, hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.y:.1f}%</b> ({point.count} counts)")) %>%
           execute_if(!input$count & input$multiple_choice, hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.y:.1f}%</b> ({point.count} counts)")) %>%
           execute_if(input$count, hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.count}</b>"))  
         
+        } else if(input$sankey){
+          
+          results1 <- data_filter() %>%
+            mutate(var_e3z8w2 = get(input$select_indicator),
+                   var_e3z8w2_2 = get(input$select_group)) %>%
+            select(var_e3z8w2_2, var_e3z8w2) %>%
+            data_to_sankey() %>%
+            mutate(to = paste(" ", to))
+          
+          plot <- hchart(results1, "sankey")
+          
+        }
       # factor variable - 2 disaggregation variables
       } else if (is.factor(data_filter()[[input$select_indicator]]) & !is.null(input$select_group) & !is.null(input$select_group2)) {
+        
+        if (!input$sankey){
         results1 <- results() %>%
           mutate(var = get(input$select_indicator),
                  var2 = paste0(get(input$select_group2), " - ", get(input$select_group)))
@@ -1013,6 +1127,18 @@ server <- function(input, output, session) {
           hc_plotOptions(series=list(stacking='normal'))  %>%
           execute_if(!input$count, hc_yAxis(min = 0, max = 100, title = list(text=""), labels = list(format = "{value}%"))) %>%
           hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}<br><b>{point.percentage:.1f}%</b> ({point.count} counts)")
+        
+        } else if(input$sankey){
+          
+          results1 <- data_filter() %>%
+            mutate(var_e3z8w2 = get(input$select_indicator),
+                   var_e3z8w2_2 = get(input$select_group),
+                   var_e3z8w2_3 = get(input$select_group2)) %>%
+            select(var_e3z8w2_3, var_e3z8w2_2, var_e3z8w2)
+          
+          plot <- hchart(data_to_sankey(results1), "sankey")
+          
+        }
         
       # numeric variable - no disaggregation
       } else if(is.null(input$select_group)) {
@@ -1054,20 +1180,31 @@ server <- function(input, output, session) {
                                       </table>"
                        ) %>%
             hc_xAxis(title="", visible = FALSE)
-          
+        
         # timeseries
         } else if(input$timeseries){
           
           timeseries_data <- data_filter() %>%
-            mutate(select_date = as.Date(get(input$select_date), format = "%Y-%m-%d"),
-                   select_ind = get(input$select_indicator)) %>%
-            arrange(select_date)
+            #mutate(select_date = ymd(get(input$select_date)),
+            mutate(select_date_e3z8w2 = as.Date(get(input$select_date), format = "%Y-%m-%d"),
+                   select_ind_e3z8w2 = get(input$select_indicator)) %>%
+            arrange(select_date_e3z8w2) %>%
+            execute_if(input$timeseries_time == "day", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "day"))) %>%
+            execute_if(input$timeseries_time == "week", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "week"))) %>%
+            execute_if(input$timeseries_time == "month", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "month"))) %>%
+            execute_if(input$timeseries_time == "year", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "year"))) %>%
+            select(select_date_e3z8w2, select_ind_e3z8w2) %>%
+            group_by(select_date_e3z8w2) %>% 
+            summarise_all(get(input$timeseries_statistic), na.rm = TRUE)
+          
           plot <- timeseries_data %>%
-            hchart("line", hcaes(x = select_date, y = select_ind)) %>%
+            hchart("line", hcaes(x = select_date_e3z8w2, y = select_ind_e3z8w2)) %>%
             hc_chart(zoomType = "x") %>%
-            hc_tooltip() %>%
             hc_yAxis(title = "") %>%
-            hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<b>{point.y:.0f}</b>")
+            hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<b>{point.y:.1f}</b>") %>%
+            hc_plotOptions(line=list(marker=list(enabled = FALSE))) %>%
+            #hc_navigator(enabled = TRUE) %>%
+            hc_rangeSelector(enabled = TRUE)
         }
         
       # numeric variable - 1 disaggregation variable
@@ -1118,14 +1255,26 @@ server <- function(input, output, session) {
         } else if(input$timeseries){
           
           timeseries_data <- data_filter() %>%
-            mutate(select_date = as.Date(get(input$select_date), format = "%Y-%m-%d"),
-                   select_ind = get(input$select_indicator),
-                   select_group = get(input$select_group)) %>%
-            arrange(select_date)
+            mutate(select_date_e3z8w2 = as.Date(get(input$select_date), format = "%Y-%m-%d"),
+                   select_ind_e3z8w2 = get(input$select_indicator),
+                   select_group_e3z8w2 = get(input$select_group)) %>%
+            arrange(select_date_e3z8w2) %>%
+            execute_if(input$timeseries_time == "day", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "day"))) %>%
+            execute_if(input$timeseries_time == "week", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "week"))) %>%
+            execute_if(input$timeseries_time == "month", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "month"))) %>%
+            execute_if(input$timeseries_time == "year", mutate(select_date_e3z8w2 = floor_date(select_date_e3z8w2, "year"))) %>%
+            select(select_date_e3z8w2, select_group_e3z8w2, select_ind_e3z8w2) %>%
+            group_by(select_group_e3z8w2, select_date_e3z8w2) %>% 
+            summarise_all(get(input$timeseries_statistic), na.rm = TRUE)
+          
           plot <- timeseries_data %>%
-            hchart("line", hcaes(x = select_date, y = select_ind, group = select_group)) %>%
+            hchart("line", hcaes(x = select_date_e3z8w2, y = select_ind_e3z8w2, group = select_group_e3z8w2)) %>%
             hc_yAxis(title = "") %>%
-            hc_chart(zoomType = "x")
+            hc_chart(zoomType = "x") %>%
+            hc_tooltip(headerFormat = "<span style = 'font-size:10'>{point.key}</span><br>", pointFormat = "<span style = 'color:{series.color}'>\u25CF</span> {series.name}: <b>{point.y:.1f}</b>") %>%
+            hc_plotOptions(line=list(marker=list(enabled = FALSE))) %>%
+            #hc_navigator(enabled = TRUE) %>%
+            hc_rangeSelector(enabled = TRUE)
           
         }
         
